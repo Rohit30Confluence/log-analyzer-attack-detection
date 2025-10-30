@@ -1,0 +1,40 @@
+# .github/projects/log-analyzer-pipeline.yml
+
+name: Log Analyzer Production Pipeline
+description: >
+  Project board tracking deployment, analysis, and real-time attack detection development.
+
+# Define project views (columns)
+views:
+  - name: Pending
+    filter: status:pending
+    layout: board
+  - name: Active
+    filter: status:active
+    layout: board
+  - name: Review
+    filter: status:review
+    layout: board
+  - name: Done
+    filter: status:done
+    layout: table
+
+# Define custom fields
+fields:
+  - name: Status
+    data_type: single_select
+    options:
+      - Pending
+      - Active
+      - Review
+      - Done
+  - name: Priority
+    data_type: single_select
+    options:
+      - Low
+      - Medium
+      - High
+  - name: Owner
+    data_type: text
+  - name: Deadline
+    data_type: date
