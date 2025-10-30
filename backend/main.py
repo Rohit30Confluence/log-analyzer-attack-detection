@@ -1,21 +1,16 @@
 # backend/main.py
-from fastapi import FastAPI, UploadFile, File, Form
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-import re
-from typing import List, Dict
+import os
+import json
+from typing import Dict, List
 from collections import defaultdict, Counter
 
-app = FastAPI(title="Log Analyzer API")
+import redis
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
-# Development CORS - change before production
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# --- Detection helper functions  ---
+import re
 
 SQLI_PATTERNS = [
     r"(\bor\b|\band\b).*(=|like)",
@@ -91,46 +86,94 @@ def detect_bruteforce_from_parsed(parsed_lines: List[Dict], threshold=10):
             })
     return brute_candidates
 
+# --- FastAPI app and Redis client ---
+app = FastAPI(title="Log Analyzer API (Realtime)")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+REDIS_URL = os.getenv("REDIS_URL", "")
+if not REDIS_URL:
+    # allow running without Redis for dev, but warn
+    redis_client = None
+else:
+    redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+
 class AnalyzeResponse(BaseModel):
     sql_injection: List[Dict]
     xss: List[Dict]
     brute_force_candidates: List[Dict]
     summary: Dict
 
-@app.post("/analyze", response_model=AnalyzeResponse)
-async def analyze_upload(file: UploadFile = File(None), raw_text: str = Form(None)):
-    if file:
-        content = (await file.read()).decode(errors="ignore")
-    elif raw_text:
-        content = raw_text
-    else:
-        return AnalyzeResponse(sql_injection=[], xss=[], brute_force_candidates=[], summary={})
-
-    sigs = detect_signatures(content)
-    parsed = list(parse_lines(content))
-    brutef = detect_bruteforce_from_parsed(parsed)
-    summary = {
-        "total_lines": len(content.splitlines()),
-        "parsed_entries": sum(1 for p in parsed if p.get("ip")),
-        "raw_matches": len(sigs["sql_injection"]) + len(sigs["xss"]),
-    }
-    return AnalyzeResponse(
-        sql_injection=sigs["sql_injection"],
-        xss=sigs["xss"],
-        brute_force_candidates=brutef,
-        summary=summary
-    )
-
-
-import os
-import uvicorn
-from fastapi import Response
-
 @app.get("/ping")
 def ping():
-    """Simple healthcheck endpoint used by Railway and for quick tests."""
     return {"status": "ok", "service": "log-analyzer-api"}
 
+@app.get("/health")
+def health():
+    try:
+        if redis_client:
+            redis_client.ping()
+        return {"status": "ok", "redis": bool(redis_client)}
+    except Exception as e:
+        return {"status": "error", "detail": str(e)}
+
+@app.post("/ingest")
+async def ingest_log(raw: str = Form(None), file: UploadFile = File(None), payload: dict = None):
+    """
+    Accept either:
+    - `raw` form field (single log line)
+    - file upload (text/plain) with many lines
+    - JSON body (application/json) as payload
+    This endpoint queues the raw text into Redis list "logs_stream".
+    """
+    # Normalize input into a JSON object
+    if payload:
+        entry = payload
+    elif file:
+        content = (await file.read()).decode(errors="ignore")
+        entry = {"raw": content}
+    elif raw:
+        entry = {"raw": raw}
+    else:
+        raise HTTPException(status_code=400, detail="No input provided. Use JSON body, file upload or raw form.")
+
+    # Add optional metadata fields
+    if "time" not in entry:
+        entry["time"] = entry.get("time") or None
+
+    # If redis is configured, push to queue
+    if redis_client:
+        try:
+            redis_client.lpush("logs_stream", json.dumps(entry))
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Redis push failed: {e}")
+        return {"queued": True}
+    else:
+        # fallback: analyze inline (not recommended for production)
+        text = entry.get("raw", "")
+        sigs = detect_signatures(text)
+        parsed = list(parse_lines(text))
+        brutef = detect_bruteforce_from_parsed(parsed)
+        summary = {
+            "total_lines": len(text.splitlines()),
+            "parsed_entries": sum(1 for p in parsed if p.get("ip")),
+            "raw_matches": len(sigs["sql_injection"]) + len(sigs["xss"]),
+        }
+        return AnalyzeResponse(
+            sql_injection=sigs["sql_injection"],
+            xss=sigs["xss"],
+            brute_force_candidates=brutef,
+            summary=summary
+        )
+
+# Keep uvicorn bootstrapping so "python main.py" works and honors $PORT set by platforms.
 if __name__ == "__main__":
+    import uvicorn, os
     port = int(os.getenv("PORT", 8000))
     uvicorn.run("main:app", host="0.0.0.0", port=port)
