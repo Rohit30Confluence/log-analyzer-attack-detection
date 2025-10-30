@@ -120,3 +120,17 @@ async def analyze_upload(file: UploadFile = File(None), raw_text: str = Form(Non
         brute_force_candidates=brutef,
         summary=summary
     )
+
+
+import os
+import uvicorn
+from fastapi import Response
+
+@app.get("/ping")
+def ping():
+    """Simple healthcheck endpoint used by Railway and for quick tests."""
+    return {"status": "ok", "service": "log-analyzer-api"}
+
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run("main:app", host="0.0.0.0", port=port)
