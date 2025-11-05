@@ -115,3 +115,11 @@ Hacktoberfest 2026 will be the **proof of scalability, community strength, and r
 
 > *“Code evolves. Threats evolve faster.  
 > Open-source defense is how we stay ahead.”*
+>
+
+## Links & References
+- 🌐 Personal Portfolio: [rohit30confluence.github.io](https://rohit30confluence.github.io)
+- 🔗 LinkedIn: [linkedin.com/in/your-profile](https://linkedin.com/in/your-profile)
+- 📝 Medium / Blog: [medium.com/@your-profile](https://medium.com/@your-profile)
+- 🎯 Hacktoberfest Contributions: [hacktoberfest.digitalocean.com/profile/your-github](https://hacktoberfest.digitalocean.com/profile/your-github)
+
