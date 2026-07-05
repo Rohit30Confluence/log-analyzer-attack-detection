@@ -1,125 +1,159 @@
-# 🧠 Log Analyzer & Attack Detection System — Hacktoberfest 2025 R&D & Strategic Report  
+# Log Analyzer & Attack Detection
 
-> **Hackathon Track:** Cybersecurity & AI-Powered Threat Detection  
-> **Repository:** [log-analyzer-attack-detection](https://github.com/Rohit30Confluence/log-analyzer-attack-detection)  
-> **Maintainer:** [@Rohit30Confluence](https://github.com/Rohit30Confluence)  
-> **Initiated:** October 2025 | **Next Milestone:** Hacktoberfest 2026  
+A Python toolkit for parsing Apache access logs and detecting common web
+attacks — **brute force**, **SQL injection**, **XSS**, and **volume-based
+anomalies** — from either a static log file (CLI) or a live ingestion
+pipeline (FastAPI + Redis backend).
 
----
+```
+$ python cli.py --input data/sample_access.log --analyze
+[+] Parsed 7 log entries.
+[*] Running attack detection...
+  -> Brute Force: 0 suspicious entries
+  -> SQL Injection: 2 suspicious entries
+  -> XSS: 1 suspicious entries
+```
 
-## 🚀 Vision  
+## Features
 
-This repository represents an ongoing open-source initiative to engineer an **AI-driven Log Analysis & Attack Detection System**.  
-The project focuses on building a scalable backend capable of detecting and analyzing **security threats in real-time**—including **SQL Injection**, **XSS**, **brute-force**, and **pattern-based attacks**—across distributed server and application logs.  
+- **Log parsing** — Apache Common Log Format (CLF) and Combined Log Format,
+  streamed line-by-line (no full-file load required).
+- **Signature-based detection**:
+  - Brute force — repeated 401/403 responses from one IP against *any*
+    endpoint within a rolling time window.
+  - SQL injection — pattern matching with percent-decoding, so `%20`-style
+    encoding doesn't bypass detection.
+  - XSS — script/event-handler pattern matching, also percent-decoded.
+- **Anomaly detection** — leave-one-out z-score on per-IP request volume,
+  flags IPs generating unusually high traffic relative to the rest of the
+  batch.
+- **Three ways to run it**: one-shot CLI, a FastAPI ingestion service backed
+  by Redis for async processing, or a real-time streaming demo.
 
-Hacktoberfest 2025 marked the beginning of this mission: transforming raw code contributions into meaningful, production-grade cybersecurity research.
+## Project structure
 
----
+```
+.
+├── analyzer/                  # Core detection library
+│   ├── parser.py              #   Log line -> structured dict
+│   ├── detector.py            #   AttackDetector facade (wires the 3 rules below)
+│   ├── anomaly_detector.py    #   Volume-based anomaly scoring
+│   └── rules/
+│       ├── brute_force.py
+│       ├── sql_injection.py
+│       └── xss.py
+├── cli.py                     # `python cli.py --input <log> --analyze --visualize`
+├── scripts/
+│   └── visualize_results.py   # Matplotlib bar chart of detected attack types
+├── backend/                   # Async ingestion service (independent of analyzer/)
+│   ├── main.py                #   FastAPI app: /ingest, /health, /ping
+│   ├── worker.py               #   Redis queue consumer, runs detection off the request path
+│   ├── realtime/run.py        #   Streaming demo built on analyzer/
+│   └── Dockerfile
+├── data/sample_access.log     # Sample log with one of each attack type, for demos/tests
+├── tests/                     # pytest suite (11 tests, one per detection path + regressions)
+├── experiments/               # Benchmarking / prototype scratch space, not part of the shipped path
+└── websitesite/               # Next.js landing page (not audited as part of the backend fix)
+```
 
-## 🏆 Hacktoberfest 2025 Achievements  
+**Note:** `analyzer/` and `backend/main.py`/`backend/worker.py` are two
+independent detection implementations (the backend originally shipped as a
+separate service with its own inline regex detectors). They aren't wired
+together — `backend/realtime/run.py` is the one backend component that uses
+`analyzer/` directly. Consolidating them into a single detection engine is
+a reasonable next step but is a larger refactor than a bug fix; see
+[Known limitations](#known-limitations).
 
-| Category | Highlights |
-|-----------|-------------|
-| **Core Development** | Developed the first open, modular detection framework using **FastAPI**, **Redis**, and **Docker**. |
-| **Automation & Deployment** | Integrated **CI/CD pipelines**, containerization, and cloud deployments (Railway / Render). |
-| **Detection Logic** | Implemented multi-layer detection: signature-based, anomaly detection, and adaptive hybrid logic. |
-| **R&D Expansion** | Designed the `rnd/core-research` branch for continuous threat modeling and AI anomaly scoring. |
-| **Open Collaboration** | 6 major pull requests merged, contributions validated under Hacktoberfest compliance. |
-| **Sustainability Impact** | Certified Tree-Nation contribution for **Trees for Tribals**, linking open-source with environmental impact. |
+## Install
 
-> 🎖️ *“Code that protects systems — and helps plant trees.”*
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+```
 
----
+For the backend service specifically:
 
-## 🧩 Current Project State  
+```bash
+pip install -r backend/requirements.txt
+```
 
-| Component | Status | Description |
-|------------|--------|-------------|
-| **Detection Engine** | ✅ Stable | Real-time and batch analysis modes implemented |
-| **Redis Integration** | ⚙️ Configurable | Supports async ingestion for live log streams |
-| **Container Deployment** | ✅ Operational | Fully Dockerized backend pipeline |
-| **Visualization Dashboard** | 🧩 In Progress | Dynamic UI planned for live attack insights |
-| **AI Anomaly Module** | 🚧 R&D Active | Building adaptive scoring & ML-based deviation mapping |
-| **Public Endpoint** | 🔄 Redeployment Planned | Transitioning from Railway to Render for stability |
+## Usage
 
----
+### CLI (one-shot analysis of a log file)
 
-## 🔬 Research & Development Focus (2025–2026)  
+```bash
+python cli.py --input data/sample_access.log --analyze --visualize
+```
 
-### 1. **AI-Augmented Threat Detection**  
-- Build a **learning model** that adapts to new log patterns and reduces false positives.  
-- Integrate with **MITRE ATT&CK** datasets for contextual analysis.  
+- `--analyze` runs all three detectors and prints a per-type count.
+- `--visualize` renders a bar chart of detected attack types
+  (`attack_trends.png` if no display is available, e.g. on a server/CI).
 
-### 2. **Collaborative Signature Library**  
-- Launch a public open-source registry (`/rules/`) for community-contributed detection patterns.  
-- Encourage global maintainers to submit YAML-based signatures for known and emerging threats.  
+### Backend API (async ingestion via Redis)
 
-### 3. **Visualization & Analytics**  
-- Develop an intuitive web dashboard to represent attack flow, frequency, and correlation in real-time.  
-- Offer modular plugins for SOC teams and researchers.  
+```bash
+export REDIS_URL=redis://localhost:6379/0   # omit to run in inline/no-queue mode
+uvicorn backend.main:app --reload
 
-### 4. **Cross-Cloud Integration**  
-- Expand deployment compatibility (Render, Fly.io, DockerHub).  
-- Enable optional **Kafka or S3 ingestion pipelines** for enterprise-grade scalability.  
+# in another terminal, run the worker (consumes the queue):
+cd backend && python worker.py
+```
 
-### 5. **Community Collaboration**  
-- Open structured issues for first-time contributors and researchers.  
-- Host mini-sprints leading up to **Hacktoberfest 2026** focusing on real-world threat simulation and response automation.  
+```bash
+curl -X POST http://localhost:8000/ingest \
+  -F "raw=$(cat data/sample_access.log)"
+```
 
----
+Without `REDIS_URL` set, `/ingest` analyzes inline and returns results
+directly (fine for local testing, not recommended for production — see
+[Known limitations](#known-limitations)). Brute-force sensitivity is
+tunable via `BRUTEFORCE_THRESHOLD` (default `5`).
 
-## 🌱 Sustainability & Open Source Responsibility  
+### Real-time streaming demo
 
-This project proudly aligns with **Hacktoberfest’s long-term value framework** — encouraging innovation through collaboration while supporting sustainability.  
+```bash
+python -m backend.realtime.run
+```
 
-**Verified Tree-Nation Contribution:**  
-- [Tree #8340337 – Trees for Tribals Project](https://tree-nation.com/trees/8340337/view)  
-- [Hacktoberfest x Tree-Nation](https://tree-nation.com/profile/hacktoberfest)  
-- [Contributor Profile – Rohit30Confluence](https://tree-nation.com/profile/rohit30confluence)  
+Streams `data/sample_access.log` line-by-line (simulating `tail -f`),
+running each line through the same `analyzer/` detection stack as the CLI,
+with a simple per-IP risk score.
 
-Each accepted PR contributes not just to code quality but also to environmental growth.
+## Testing
 
----
+```bash
+pytest tests/ -v
+```
 
-## 🎯 Roadmap to Hacktoberfest 2026  
+11 tests, covering: log parsing (including malformed lines and payloads
+with embedded spaces), brute force (on-threshold, below-threshold, and
+non-`/login` endpoints), SQL injection (plain and percent-encoded), XSS
+(plain and percent-encoded), and anomaly detection.
 
-| Quarter | Objective | Milestone |
-|----------|------------|-----------|
-| **Q4 2025** | Finalize Render deployment | Stable backend and CI/CD pipeline |
-| **Q1 2026** | Release anomaly scoring module | Public testing phase |
-| **Q2 2026** | Develop analytics dashboard | Real-time visualization beta |
-| **Q3 2026** | Open collaboration sprint | External PRs and security plugin submissions |
-| **Q4 2026** | Hacktoberfest 2026 showcase | Present the system as a mature open-source product |
+## Known limitations
 
----
+Documented here deliberately, rather than left for someone to discover in
+production:
 
-## 🤝 Call for Contributors  
+- **Detection is regex/threshold-based, not ML.** It will not catch
+  attacks split across multiple encoding layers, obfuscated payloads, or
+  slow/low-and-slow brute force spread across many IPs (no distributed
+  attack correlation).
+- **`analyzer/` and `backend/main.py` are two separate detection
+  implementations.** They currently agree on detection *logic* but are not
+  the same code path — a fix to one does not automatically apply to the
+  other. `backend/realtime/run.py` is the only backend entry point that
+  uses `analyzer/` directly.
+- **Anomaly detection is a single-batch heuristic**, not a time-series
+  baseline — it compares IPs against each other within one call, not
+  against historical norms for that IP.
+- **No authentication on the `/ingest` endpoint.** Fine for local/demo use;
+  put it behind an API gateway or add auth before exposing it externally.
 
-The **Log Analyzer & Attack Detection System** is more than a hackathon artifact — it’s an evolving R&D initiative.  
-We’re calling for contributions from developers, data scientists, and cybersecurity enthusiasts who believe in **open, transparent, and scalable defense systems**.  
+## Contributing
 
-You can help by:  
-- Adding **new detection rules or datasets**.  
-- Improving the **AI anomaly scoring module**.  
-- Contributing to the **dashboard interface**.  
-- Writing **test cases, documentation, or integration plugins**.  
+See `CONTRIBUTING.md`.
 
-Join the discussion via GitHub Issues, fork the repo, and be part of the next generation of **AI-powered cybersecurity innovation**.
+## License
 
----
-
-### 🏁 Final Note  
-
-Hacktoberfest 2025 was the **starting point**.  
-Hacktoberfest 2026 will be the **proof of scalability, community strength, and responsible AI in cybersecurity**.  
-
-> *“Code evolves. Threats evolve faster.  
-> Open-source defense is how we stay ahead.”*
->
-
-## Links & References
-- 🌐 Personal Portfolio: [rohit30confluence.github.io](https://rohit30confluence.github.io)
-- 🔗 LinkedIn: [linkedin.com/in/your-profile](https://linkedin.com/in/your-profile)
-- 📝 Medium / Blog: [medium.com/@your-profile](https://medium.com/@your-profile)
-- 🎯 Hacktoberfest Contributions: [hacktoberfest.digitalocean.com/profile/your-github](https://hacktoberfest.digitalocean.com/profile/your-github)
-
+See `LICENSE`.
