@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="320" viewBox="0 0 1280 320">
+  <rect width="100%" height="100%" fill="#0f172a" />
+  <g transform="translate(60,60)">
+    <text x="0" y="40" font-family="Inter, Arial, sans-serif" font-size="36" fill="#ffffff" font-weight="700">
+      Log Analyzer & Attack Detection
+    </text>
+    <text x="0" y="90" font-family="Inter, Arial, sans-serif" font-size="18" fill="#94a3b8">
+      Detect. Analyze. Defend. — Apache log analysis with rule-based & anomaly scoring.
+    </text>
+  </g>
+</svg>
