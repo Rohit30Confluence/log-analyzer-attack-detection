@@ -1,0 +1,13 @@
+services:
+  logsentinel:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data:ro
+      - logsentinel-db:/app/db
+    environment:
+      - LOGSENTINEL_DB=/app/db/logsentinel.db
+
+volumes:
+  logsentinel-db:
