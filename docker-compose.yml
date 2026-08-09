@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 services:
   logsentinel:
     build: ./backend
@@ -11,3 +12,67 @@ services:
 
 volumes:
   logsentinel-db:
+=======
+# docker-compose.yml
+# Full stack: API + Redis + Worker
+#
+# Usage:
+#   docker compose up --build
+#
+# API will be available at http://localhost:8000
+# Docs (Swagger UI) at      http://localhost:8000/docs
+
+version: "3.9"
+
+services:
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      API_KEY: ${API_KEY:-}
+      BRUTEFORCE_THRESHOLD: ${BRUTEFORCE_THRESHOLD:-5}
+      ANOMALY_THRESHOLD: ${ANOMALY_THRESHOLD:-2.5}
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    command: python backend/worker.py
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      BRUTEFORCE_THRESHOLD: ${BRUTEFORCE_THRESHOLD:-5}
+      ANOMALY_THRESHOLD: ${ANOMALY_THRESHOLD:-2.5}
+    depends_on:
+      redis:
+        condition: service_healthy
+
+networks:
+  default:
+    name: log-analyzer-net
+>>>>>>> origin/main

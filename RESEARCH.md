@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Research notes
 
 Notes on the design decisions behind this project, kept here rather than in
@@ -54,3 +55,11 @@ of two.
   Apache logs (`/etc/passwd`, `boot.ini` probes) and the marginal
   implementation cost was small given the existing percent-decode-then-match
   pattern from the SQLi/XSS detectors.
+=======
+# R&D Core Research
+
+This document defines the baseline objectives of the R&D initiative:
+- Establish an experimental environment for algorithmic exploration.
+- Document findings and performance benchmarks.
+- Maintain reproducibility across research phases.
+>>>>>>> origin/main
