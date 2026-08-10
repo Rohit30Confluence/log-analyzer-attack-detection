@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>LogSentinel — local attack detection</title>
+<link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="scanline" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">▌</span>
+      <span class="brand-name">LogSentinel</span>
+      <span class="brand-sub">local attack detection</span>
+    </div>
+    <div class="status" id="conn-status">
+      <span class="dot dot-off" id="conn-dot"></span>
+      <span id="conn-text">connecting…</span>
+    </div>
+  </header>
+
+  <main class="grid">
+    <section class="panel panel-controls">
+      <h2>Traffic</h2>
+      <p class="hint">No production logs to point at? Generate realistic synthetic traffic — benign requests plus periodic brute-force, SQLi, XSS and traversal bursts — run through the exact same detection pipeline as everything else.</p>
+      <div class="btn-row">
+        <button id="sim-start" class="btn btn-primary">Start live simulation</button>
+        <button id="sim-stop" class="btn btn-ghost" disabled>Stop</button>
+      </div>
+      <div class="divider"></div>
+      <h2>Analyze a file</h2>
+      <p class="hint">Or drop in a real Apache combined-format log and analyze it once.</p>
+      <input type="file" id="file-input" class="file-input" />
+      <button id="analyze-btn" class="btn btn-primary">Analyze</button>
+      <div id="analyze-result" class="analyze-result"></div>
+    </section>
+
+    <section class="panel panel-stats">
+      <h2>Overview</h2>
+      <div class="stat-cards" id="stat-cards">
+        <div class="stat-card">
+          <span class="stat-value" id="stat-total">0</span>
+          <span class="stat-label">total alerts</span>
+        </div>
+      </div>
+      <div id="type-bars" class="type-bars"></div>
+      <h3>Top source IPs</h3>
+      <ol id="top-ips" class="top-ips"></ol>
+    </section>
+
+    <section class="panel panel-feed">
+      <h2>Live feed <span class="pulse" id="feed-pulse"></span></h2>
+      <div id="feed" class="feed"></div>
+    </section>
+
+    <section class="panel panel-table">
+      <h2>Recent alerts</h2>
+      <table class="alert-table">
+        <thead>
+          <tr><th>time</th><th>type</th><th>ip</th><th>severity</th><th>detail</th></tr>
+        </thead>
+        <tbody id="alert-rows"></tbody>
+      </table>
+    </section>
+  </main>
+
+  <footer class="footer">
+    Runs 100% on your machine — SQLite file storage, no external services, no accounts, nothing to host.
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
