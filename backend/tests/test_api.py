@@ -68,3 +68,18 @@ def test_simulate_start_stop():
     assert res.json()["running"] is True
     res = client.post("/api/simulate/stop")
     assert res.json()["running"] is False
+
+def test_xss_payload_is_returned_as_data_not_executable_markup():
+    malicious = (
+        '198.51.100.50 - - [10/Aug/2026:09:01:00 +0000] '
+        '"GET /search?q=%3Cscript%3Ealert(1)%3C%2Fscript%3E HTTP/1.1" '
+        '200 220 "-" "-"'
+    )
+
+    res = client.post("/api/analyze", data={"raw": malicious})
+
+    assert res.status_code == 200
+
+    body = res.json()
+    assert body["parsed_entries"] == 1
+    assert any(a["type"] == "XSS" for a in body["alerts"])

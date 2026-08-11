@@ -34,7 +34,7 @@ If the tests pass, you're ready to go.
   user-agents / scanner fingerprints)
 - Nginx log format support alongside Apache combined
 - A "replay" mode that ingests a real log file at simulated real-time speed
-- Rate-limiting / IP allowlisting for the `/api/ingest` path if you extend it
+- Rate-limiting / IP allowlisting for any future public ingestion endpoint
 - Export alerts to CSV/JSON from the dashboard
 
 ## Reporting bugs
