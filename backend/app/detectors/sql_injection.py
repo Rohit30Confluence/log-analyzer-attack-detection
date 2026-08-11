@@ -1,12 +1,15 @@
-"""SQL injection: signature matching against the request path/query, decoded."""
+"""SQL injection signature detection."""
+
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 from urllib.parse import unquote
 
-# Matched only against the decoded PATH (not the whole raw line) to avoid
-# false-positiving on unrelated '#' or '--' in referrers/user-agents.
+from ..events import SecurityEvent
+from .rules import SQL_INJECTION
+
+
 SQLI_PATTERNS = [
     r"\bunion\b[\s\S]{0,40}\bselect\b",
     r"\bdrop\s+table\b",
@@ -18,6 +21,7 @@ SQLI_PATTERNS = [
     r"';?\s*--",
     r"/\*[\s\S]*?\*/",
 ]
+
 _COMPILED = re.compile("|".join(SQLI_PATTERNS), re.IGNORECASE)
 
 
@@ -25,13 +29,22 @@ class SQLInjectionDetector:
     def analyze(self, entry: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         path = entry.get("path") or ""
         decoded = unquote(path)
-        m = _COMPILED.search(decoded)
-        if not m:
+        match = _COMPILED.search(decoded)
+
+        if not match:
             return None
-        return {
-            "type": "SQL Injection",
-            "ip": entry.get("ip"),
-            "detail": f"Suspicious query on {decoded[:120]}",
-            "pattern": m.group(0),
-            "severity": "high",
-        }
+
+        evidence = match.group(0)
+
+        return SecurityEvent(
+            event_type="SQL Injection",
+            detector="SQLInjectionDetector",
+            rule_id=SQL_INJECTION,
+            severity="high",
+            confidence=0.92,
+            source_ip=entry.get("ip"),
+            target=decoded[:120],
+            evidence=evidence[:120],
+            detail=f"Suspicious query on {decoded[:120]}",
+            pattern=evidence[:120],
+        ).to_dict()
