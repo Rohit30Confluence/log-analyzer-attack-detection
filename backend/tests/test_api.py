@@ -83,3 +83,39 @@ def test_xss_payload_is_returned_as_data_not_executable_markup():
     body = res.json()
     assert body["parsed_entries"] == 1
     assert any(a["type"] == "XSS" for a in body["alerts"])
+
+
+def test_security_headers_are_present():
+    res = client.get("/api/ping")
+    assert res.status_code == 200
+    assert res.headers["x-content-type-options"] == "nosniff"
+    assert res.headers["x-frame-options"] == "DENY"
+    assert res.headers["referrer-policy"] == "no-referrer"
+
+
+def test_alert_limit_is_bounded():
+    res = client.get("/api/alerts?limit=201")
+    assert res.status_code == 400
+
+
+def test_alert_limit_rejects_zero():
+    res = client.get("/api/alerts?limit=0")
+    assert res.status_code == 400
+
+
+def test_analyze_rejects_oversized_raw_input():
+    oversized = "x" * (2 * 1024 * 1024 + 1)
+
+    res = client.post("/api/analyze", data={"raw": oversized})
+
+    assert res.status_code == 413
+
+
+def test_cors_does_not_allow_arbitrary_origin():
+    res = client.get(
+        "/api/ping",
+        headers={"Origin": "https://evil.example"},
+    )
+
+    assert res.status_code == 200
+    assert "access-control-allow-origin" not in res.headers
