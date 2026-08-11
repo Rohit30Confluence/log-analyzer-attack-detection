@@ -168,3 +168,107 @@ def test_stats_use_canonical_event_type():
 
     assert "SQL Injection" in body["by_type"]
     assert "Brute Force" in body["by_type"]
+
+
+def _lifecycle_log(ip: str, path: str = "/login") -> str:
+    lines = [
+        f'{ip} - - [12/Aug/2026:01:00:0{i} +0000] '
+        f'"POST {path} HTTP/1.1" 401 0 "-" "-"'
+        for i in range(5)
+    ]
+    return "\n".join(lines)
+
+
+LIFECYCLE_LOG_OPEN = _lifecycle_log("198.18.0.10", "/lifecycle-open")
+LIFECYCLE_LOG_REPEAT = _lifecycle_log("198.18.0.11", "/lifecycle-repeat")
+LIFECYCLE_LOG_STATUS = _lifecycle_log("198.18.0.12", "/lifecycle-status")
+
+
+def test_security_event_starts_open():
+    res = client.post("/api/analyze", data={"raw": LIFECYCLE_LOG_OPEN})
+
+    assert res.status_code == 200
+
+    event = res.json()["alerts"][0]
+
+    assert event["status"] == "open"
+    assert event["occurrence_count"] == 1
+    assert event["correlation_id"]
+
+
+def test_repeated_event_is_correlated():
+    first = client.post("/api/analyze", data={"raw": LIFECYCLE_LOG_REPEAT})
+    second = client.post("/api/analyze", data={"raw": LIFECYCLE_LOG_REPEAT})
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+
+    first_events = first.json()["alerts"]
+    second_events = second.json()["alerts"]
+
+    assert first_events
+    assert second_events
+
+    first_event = first_events[0]
+    second_event = second_events[0]
+
+    assert second_event["event_id"] == first_event["event_id"]
+    assert second_event["correlation_id"] == first_event["correlation_id"]
+    assert second_event["occurrence_count"] == 2
+
+
+def test_alert_status_can_be_acknowledged():
+    res = client.post("/api/analyze", data={"raw": LIFECYCLE_LOG_STATUS})
+
+    event_id = res.json()["alerts"][0]["event_id"]
+
+    res = client.patch(
+        f"/api/alerts/{event_id}/status",
+        json={"status": "acknowledged"},
+    )
+
+    assert res.status_code == 200
+    assert res.json()["status"] == "acknowledged"
+
+
+def test_alert_status_follows_lifecycle():
+    res = client.post("/api/analyze", data={"raw": LIFECYCLE_LOG_STATUS})
+
+    event_id = res.json()["alerts"][0]["event_id"]
+
+    for status in ("acknowledged", "investigating", "contained", "resolved"):
+        res = client.patch(
+            f"/api/alerts/{event_id}/status",
+            json={"status": status},
+        )
+
+        assert res.status_code == 200
+        assert res.json()["status"] == status
+
+
+def test_invalid_lifecycle_transition_is_rejected():
+    res = client.post("/api/analyze", data={"raw": LIFECYCLE_LOG_STATUS})
+
+    event_id = res.json()["alerts"][0]["event_id"]
+
+    res = client.patch(
+        f"/api/alerts/{event_id}/status",
+        json={"status": "resolved"},
+    )
+
+    assert res.status_code == 200
+
+    res = client.patch(
+        f"/api/alerts/{event_id}/status",
+        json={"status": "investigating"},
+    )
+
+    assert res.status_code == 400
+
+
+def test_unknown_alert_returns_404():
+    res = client.get(
+        "/api/alerts/00000000-0000-0000-0000-000000000000"
+    )
+
+    assert res.status_code == 404
