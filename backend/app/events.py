@@ -30,6 +30,14 @@ class SecurityEvent:
     event_version: str = EVENT_VERSION
     metadata: Dict[str, Any] = field(default_factory=dict)
 
+    # Response/lifecycle state.
+    status: str = "open"
+    first_seen: Optional[str] = None
+    last_seen: Optional[str] = None
+    occurrence_count: int = 1
+    correlation_id: Optional[str] = None
+    resolution: Optional[str] = None
+
     def __post_init__(self) -> None:
         if not 0.0 <= self.confidence <= 1.0:
             raise ValueError("confidence must be between 0.0 and 1.0")
@@ -45,6 +53,20 @@ class SecurityEvent:
 
         if not self.rule_id:
             raise ValueError("rule_id is required")
+
+        from .lifecycle import STATUSES
+
+        if self.status not in STATUSES:
+            raise ValueError(f"invalid status: {self.status}")
+
+        if self.occurrence_count < 1:
+            raise ValueError("occurrence_count must be at least 1")
+
+        if self.first_seen is None:
+            self.first_seen = self.observed_at
+
+        if self.last_seen is None:
+            self.last_seen = self.observed_at
 
     def to_dict(self) -> Dict[str, Any]:
         """

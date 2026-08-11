@@ -18,6 +18,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import List, Optional
 
+from pydantic import BaseModel
+
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -211,6 +213,41 @@ def alerts(
         raise HTTPException(status_code=400, detail="Invalid alert type.")
 
     return db.get_alerts(limit=limit, alert_type=type)
+
+
+class AlertStatusUpdate(BaseModel):
+    status: str
+    resolution: Optional[str] = None
+
+
+@app.get("/api/alerts/{event_id}")
+def alert_detail(event_id: str):
+    event = db.get_alert(event_id)
+
+    if event is None:
+        raise HTTPException(status_code=404, detail="Alert not found.")
+
+    return event
+
+
+@app.patch("/api/alerts/{event_id}/status")
+def update_alert_status(event_id: str, update: AlertStatusUpdate):
+    try:
+        event = db.update_alert_status(
+            event_id=event_id,
+            status=update.status,
+            resolution=update.resolution,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc),
+        ) from exc
+
+    if event is None:
+        raise HTTPException(status_code=404, detail="Alert not found.")
+
+    return event
 
 
 @app.get("/api/stats")

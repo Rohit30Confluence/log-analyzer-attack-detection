@@ -62,6 +62,13 @@ class Alert(Base):
 
     event_metadata = Column("metadata", JSON, nullable=False, default=dict)
 
+    status = Column(String, index=True, nullable=False, default="open")
+    first_seen = Column(String, nullable=False)
+    last_seen = Column(String, nullable=False)
+    occurrence_count = Column(Integer, nullable=False, default=1)
+    correlation_id = Column(String, index=True)
+    resolution = Column(String)
+
     # Existing API/database compatibility field.
     created_at = Column(DateTime, server_default=func.now(), index=True)
 
@@ -122,6 +129,12 @@ def _migrate_alerts_table() -> None:
             "evidence": "TEXT",
             "observed_at": "TEXT",
             "metadata": "TEXT",
+            "status": "TEXT",
+            "first_seen": "TEXT",
+            "last_seen": "TEXT",
+            "occurrence_count": "INTEGER",
+            "correlation_id": "TEXT",
+            "resolution": "TEXT",
         }
 
         for column, sql_type in required_columns.items():
@@ -252,6 +265,12 @@ def _canonical_event(a: Dict[str, Any]) -> Dict[str, Any]:
         "detail": a.get("detail"),
         "pattern": a.get("pattern") or a.get("evidence"),
         "event_metadata": a.get("metadata") or {},
+        "status": a.get("status", "open"),
+        "first_seen": a.get("first_seen") or a.get("observed_at") or "",
+        "last_seen": a.get("last_seen") or a.get("observed_at") or "",
+        "occurrence_count": int(a.get("occurrence_count", 1)),
+        "correlation_id": a.get("correlation_id"),
+        "resolution": a.get("resolution"),
     }
 
 
@@ -279,8 +298,29 @@ def _presentation(row: Alert) -> Dict[str, Any]:
         "ip": row.source_ip,
 
         "metadata": row.event_metadata or {},
+        "status": row.status,
+        "first_seen": row.first_seen,
+        "last_seen": row.last_seen,
+        "occurrence_count": row.occurrence_count,
+        "correlation_id": row.correlation_id,
+        "resolution": row.resolution,
         "created_at": row.created_at.isoformat() if row.created_at else None,
     }
+
+
+def _correlation_id(event: Dict[str, Any]) -> str:
+    """Stable correlation key for repeated occurrences of the same attack."""
+    import hashlib
+
+    material = "|".join(
+        [
+            str(event.get("rule_id") or ""),
+            str(event.get("source_ip") or ""),
+            str(event.get("target") or ""),
+        ]
+    )
+
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()[:32]
 
 
 def save_alerts(alerts: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -290,6 +330,49 @@ def save_alerts(alerts: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
     try:
         for raw in alerts:
             a = _canonical_event(raw)
+
+            correlation_id = a.get("correlation_id") or _correlation_id(a)
+            a["correlation_id"] = correlation_id
+
+            existing = (
+                session.query(Alert)
+                .filter(Alert.correlation_id == correlation_id)
+                .filter(Alert.status != "resolved")
+                .order_by(Alert.id.desc())
+                .first()
+            )
+
+            if existing is not None:
+                existing.last_seen = a["last_seen"]
+                existing.occurrence_count = (
+                    existing.occurrence_count or 1
+                ) + 1
+
+                # Preserve the strongest currently observed severity.
+                severity_rank = {
+                    "low": 0,
+                    "medium": 1,
+                    "high": 2,
+                    "critical": 3,
+                }
+
+                if severity_rank.get(a["severity"], 0) > severity_rank.get(
+                    existing.severity, 0
+                ):
+                    existing.severity = a["severity"]
+
+                if a.get("evidence"):
+                    existing.evidence = a["evidence"]
+
+                if a.get("detail"):
+                    existing.detail = a["detail"]
+
+                if a.get("pattern"):
+                    existing.pattern = a["pattern"]
+
+                session.flush()
+                saved.append(_presentation(existing))
+                continue
 
             row = Alert(**a)
             session.add(row)
@@ -305,7 +388,6 @@ def save_alerts(alerts: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
         session.close()
 
     return saved
-
 
 def get_alerts(
     limit: int = 100,
@@ -415,5 +497,64 @@ def get_ip_history(ip: str, windows: int = 20) -> List[int]:
         )
 
         return [row[0] for row in reversed(rows)]
+    finally:
+        session.close()
+
+
+def update_alert_status(
+    event_id: str,
+    status: str,
+    resolution: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    from .lifecycle import STATUSES, can_transition
+
+    if status not in STATUSES:
+        raise ValueError("invalid status")
+
+    session = SessionLocal()
+
+    try:
+        row = (
+            session.query(Alert)
+            .filter(Alert.event_id == event_id)
+            .first()
+        )
+
+        if row is None:
+            return None
+
+        if not can_transition(row.status, status):
+            raise ValueError(
+                f"invalid lifecycle transition: "
+                f"{row.status} -> {status}"
+            )
+
+        row.status = status
+
+        if resolution is not None:
+            row.resolution = resolution
+
+        session.commit()
+        session.refresh(row)
+
+        return _presentation(row)
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+def get_alert(event_id: str) -> Optional[Dict[str, Any]]:
+    session = SessionLocal()
+
+    try:
+        row = (
+            session.query(Alert)
+            .filter(Alert.event_id == event_id)
+            .first()
+        )
+
+        return _presentation(row) if row else None
     finally:
         session.close()
