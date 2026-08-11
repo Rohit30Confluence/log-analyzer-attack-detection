@@ -19,3 +19,8 @@ venv/
 
 # Env
 .env
+
+# Node / Next.js
+node_modules/
+.next/
+out/
