@@ -1,28 +1,28 @@
 """
 LogSentinel API — fully local, zero external services.
 
-Endpoints:
-  GET  /api/ping                — liveness
-  POST /api/analyze             — one-shot analysis of uploaded/pasted log text
-  GET  /api/alerts              — recent alerts (from SQLite)
-  GET  /api/stats               — summary counts
-  POST /api/simulate/start      — start the live traffic simulator
-  POST /api/simulate/stop       — stop it
-  GET  /api/simulate/status     — is it running
-  WS   /ws/live                 — live alert stream (used by the dashboard)
-  GET  /                        — static dashboard (no build step, vanilla JS)
+Security baseline:
+- bounded request bodies and uploads
+- restrictive CORS
+- security response headers
+- bounded database queries
+- WebSocket origin validation
+- controlled simulator lifecycle
 """
+
 from __future__ import annotations
 
 import json
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import FastAPI, File, Form, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from . import db
 from .detector import AttackDetector
@@ -32,6 +32,28 @@ from .simulator import Simulator
 APP_ROOT = Path(__file__).resolve().parents[1]
 STATIC_DIR = APP_ROOT / "static"
 
+MAX_ANALYZE_BYTES = int(os.getenv("LOGSENTINEL_MAX_ANALYZE_BYTES", str(2 * 1024 * 1024)))
+MAX_ALERT_LIMIT = int(os.getenv("LOGSENTINEL_MAX_ALERT_LIMIT", "200"))
+MAX_RAW_LINES = int(os.getenv("LOGSENTINEL_MAX_RAW_LINES", "50000"))
+
+ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("LOGSENTINEL_ALLOWED_ORIGINS", "http://localhost:8000").split(",")
+    if origin.strip()
+]
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+
+        return response
+
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
@@ -39,28 +61,44 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="LogSentinel", version="1.0.0", lifespan=lifespan)
+app = FastAPI(
+    title="LogSentinel",
+    version="1.0.0",
+    lifespan=lifespan,
+)
+
+app.add_middleware(SecurityHeadersMiddleware)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
 )
 
 detector = AttackDetector()
 
 
-# ---------------------------------------------------------------------------
-# WebSocket connection manager
-# ---------------------------------------------------------------------------
 class ConnectionManager:
     def __init__(self):
         self.active: List[WebSocket] = []
 
     async def connect(self, ws: WebSocket):
+        origin = ws.headers.get("origin")
+
+        if origin and origin not in ALLOWED_ORIGINS:
+            await ws.close(code=1008, reason="Origin not allowed")
+            return False
+
         await ws.accept()
+
+        if len(self.active) >= 20:
+            await ws.close(code=1013, reason="Too many connections")
+            return False
+
         self.active.append(ws)
+        return True
 
     def disconnect(self, ws: WebSocket):
         if ws in self.active:
@@ -68,11 +106,13 @@ class ConnectionManager:
 
     async def broadcast(self, payload: dict):
         dead = []
+
         for ws in self.active:
             try:
                 await ws.send_text(json.dumps(payload))
             except Exception:
                 dead.append(ws)
+
         for ws in dead:
             self.disconnect(ws)
 
@@ -81,40 +121,74 @@ manager = ConnectionManager()
 
 
 async def _process_lines(lines: List[str]):
-    """Shared pipeline: parse -> detect -> persist -> broadcast. Used by both
-    /api/analyze and the simulator, so there is exactly one code path."""
     text = "\n".join(lines)
     parsed = list(parse_text(text))
     alerts = detector.detect(parsed)
+
     saved = db.save_alerts(alerts) if alerts else []
+
     if saved:
         await manager.broadcast({"type": "alerts", "data": saved})
+
     await manager.broadcast({"type": "traffic", "count": len(parsed)})
+
     return parsed, saved
 
 
 simulator = Simulator(on_batch=_process_lines, interval=3.0)
 
 
-# ---------------------------------------------------------------------------
-# REST routes
-# ---------------------------------------------------------------------------
 @app.get("/api/ping")
 def ping():
     return {"status": "ok", "service": "logsentinel"}
 
 
 @app.post("/api/analyze")
-async def analyze(raw: Optional[str] = Form(None), file: Optional[UploadFile] = File(None)):
+async def analyze(
+    raw: Optional[str] = Form(None),
+    file: Optional[UploadFile] = File(None),
+):
     if file is not None:
-        content = (await file.read()).decode(errors="ignore")
-    elif raw:
-        content = raw
-    else:
-        return {"error": "Provide 'raw' text or a file upload."}
+        content = await file.read(MAX_ANALYZE_BYTES + 1)
 
-    lines = content.splitlines()
+        if len(content) > MAX_ANALYZE_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Input exceeds {MAX_ANALYZE_BYTES} byte limit.",
+            )
+
+        try:
+            content_text = content.decode("utf-8")
+        except UnicodeDecodeError:
+            content_text = content.decode("utf-8", errors="replace")
+
+    elif raw is not None:
+        raw_bytes = raw.encode("utf-8")
+
+        if len(raw_bytes) > MAX_ANALYZE_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Input exceeds {MAX_ANALYZE_BYTES} byte limit.",
+            )
+
+        content_text = raw
+
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide 'raw' text or a file upload.",
+        )
+
+    lines = content_text.splitlines()
+
+    if len(lines) > MAX_RAW_LINES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Input exceeds {MAX_RAW_LINES} line limit.",
+        )
+
     parsed, saved = await _process_lines(lines)
+
     return {
         "lines_received": len(lines),
         "parsed_entries": len(parsed),
@@ -123,7 +197,19 @@ async def analyze(raw: Optional[str] = Form(None), file: Optional[UploadFile] = 
 
 
 @app.get("/api/alerts")
-def alerts(limit: int = 100, type: Optional[str] = None):
+def alerts(
+    limit: int = 100,
+    type: Optional[str] = None,
+):
+    if limit < 1 or limit > MAX_ALERT_LIMIT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"limit must be between 1 and {MAX_ALERT_LIMIT}.",
+        )
+
+    if type is not None and (len(type) > 100 or not type.strip()):
+        raise HTTPException(status_code=400, detail="Invalid alert type.")
+
     return db.get_alerts(limit=limit, alert_type=type)
 
 
@@ -134,9 +220,6 @@ def stats():
 
 @app.post("/api/simulate/start")
 async def simulate_start():
-    # Must be an async endpoint: it runs on the event loop thread, which is
-    # required for asyncio.create_task() inside simulator.start(). A sync
-    # endpoint runs in a worker thread with no running loop and would fail.
     simulator.start()
     return {"running": simulator.running}
 
@@ -154,17 +237,18 @@ def simulate_status():
 
 @app.websocket("/ws/live")
 async def ws_live(websocket: WebSocket):
-    await manager.connect(websocket)
+    connected = await manager.connect(websocket)
+
+    if not connected:
+        return
+
     try:
         while True:
-            await websocket.receive_text()  # keep-alive / ignore client pings
+            await websocket.receive_text()
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 
 
-# ---------------------------------------------------------------------------
-# Static dashboard (no build step — plain HTML/CSS/JS)
-# ---------------------------------------------------------------------------
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
