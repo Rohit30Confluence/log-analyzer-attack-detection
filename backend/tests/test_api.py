@@ -272,3 +272,24 @@ def test_unknown_alert_returns_404():
     )
 
     assert res.status_code == 404
+
+def test_analyze_attaches_response_decision():
+    log = "\n".join(
+        f'198.18.0.77 - - [12/Aug/2026:01:00:0{i} +0000] '
+        f'"POST /response-test HTTP/1.1" 401 0 "-" "-"'
+        for i in range(5)
+    )
+
+    res = client.post("/api/analyze", data={"raw": log})
+
+    assert res.status_code == 200
+
+    body = res.json()
+    assert body["alerts"]
+
+    response = body["alerts"][0]["response"]
+
+    assert response["action"] == "observe"
+    assert response["policy_id"] == "response.default.v1"
+    assert response["reason"]
+    assert response["requires_approval"] is False
