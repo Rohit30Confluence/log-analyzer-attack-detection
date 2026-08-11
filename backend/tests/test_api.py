@@ -119,3 +119,52 @@ def test_cors_does_not_allow_arbitrary_origin():
 
     assert res.status_code == 200
     assert "access-control-allow-origin" not in res.headers
+
+
+def test_security_event_contract_is_persisted():
+    res = client.post("/api/analyze", data={"raw": SAMPLE_LOG})
+
+    assert res.status_code == 200
+
+    body = res.json()
+    assert body["alerts"]
+
+    event = body["alerts"][0]
+
+    assert event["event_id"]
+    assert event["event_version"] == "1.0"
+    assert event["event_type"]
+    assert event["detector"]
+    assert event["rule_id"]
+    assert 0.0 <= event["confidence"] <= 1.0
+    assert "observed_at" in event
+    assert "metadata" in event
+
+    # Compatibility fields remain available to the existing dashboard.
+    assert event["type"] == event["event_type"]
+    assert event["ip"] == event["source_ip"]
+
+
+def test_alert_filter_uses_canonical_event_type():
+    client.post("/api/analyze", data={"raw": SAMPLE_LOG})
+
+    res = client.get("/api/alerts?type=SQL%20Injection")
+
+    assert res.status_code == 200
+    assert res.json()
+    assert all(
+        event["event_type"] == "SQL Injection"
+        for event in res.json()
+    )
+
+
+def test_stats_use_canonical_event_type():
+    client.post("/api/analyze", data={"raw": SAMPLE_LOG})
+
+    res = client.get("/api/stats")
+
+    assert res.status_code == 200
+    body = res.json()
+
+    assert "SQL Injection" in body["by_type"]
+    assert "Brute Force" in body["by_type"]
