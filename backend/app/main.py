@@ -29,6 +29,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from . import db
 from .detector import AttackDetector
 from .parser import parse_text
+from .response import evaluate_event
 from .simulator import Simulator
 
 APP_ROOT = Path(__file__).resolve().parents[1]
@@ -128,6 +129,15 @@ async def _process_lines(lines: List[str]):
     alerts = detector.detect(parsed)
 
     saved = db.save_alerts(alerts) if alerts else []
+
+    for event in saved:
+        decision = evaluate_event(event)
+        event["response"] = {
+            "action": decision.action,
+            "policy_id": decision.policy_id,
+            "reason": decision.reason,
+            "requires_approval": decision.requires_approval,
+        }
 
     if saved:
         await manager.broadcast({"type": "alerts", "data": saved})
