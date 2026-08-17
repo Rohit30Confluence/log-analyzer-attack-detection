@@ -2,7 +2,7 @@
 
 **A self-contained Apache log analyzer & attack detector that runs entirely on your machine — no cloud account, no external database, nothing to host.**
 
-[![CI](https://github.com/<you>/logsentinel/actions/workflows/ci.yml/badge.svg)](https://github.com/<you>/logsentinel/actions/workflows/ci.yml)
+[![CI](https://github.com/Rohit30Confluence/logsentinel/actions/workflows/ci.yml/badge.svg)](https://github.com/Rohit30Confluence/logsentinel/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](backend/requirements.txt)
 
@@ -10,8 +10,6 @@ Point it at a real Apache access log, or hit "Start live simulation" and
 watch it catch brute-force logins, SQL injection, XSS, and path traversal
 attempts in synthetic traffic in real time — all in a terminal-styled
 dashboard, all stored in a local SQLite file.
-
-> Replace `<you>` in the badge URLs above with your GitHub username once you push this.
 
 ---
 
